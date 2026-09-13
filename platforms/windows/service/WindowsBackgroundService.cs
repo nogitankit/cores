@@ -1,5 +1,6 @@
 using lib;
 using Serilog;
+using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
@@ -11,6 +12,13 @@ public sealed class WindowsBackgroundService : BackgroundService {
 	internal static Analytics Analytics = new();
 	internal static Server Server = new();
 	private readonly Notification notificationChecker = new();
+
+	private static void RunShutdownStep(string stepName, Action action) {
+		var stopwatch = Stopwatch.StartNew();
+		Log.Information("Stopping {ShutdownStep}", stepName);
+		action();
+		Log.Information("Stopped {ShutdownStep} in {ElapsedMilliseconds} ms", stepName, stopwatch.ElapsedMilliseconds);
+	}
 
 	private static Task StartSupervisedTask(string taskName, Func<CancellationToken, Task> taskFactory, CancellationToken stoppingToken) {
 		return Task.Run(async () => {
@@ -110,10 +118,10 @@ public sealed class WindowsBackgroundService : BackgroundService {
 			// Ensure background loops are cancelled even when main loop exits due to failure.
 			backgroundTaskCts.Cancel();
 
-			RTCServer.Stop();
-			Server.Stop();
-			Program.Database.Close();
-			HardwareInfo.Stop();
+			RunShutdownStep(nameof(RTCServer), RTCServer.Stop);
+			RunShutdownStep(nameof(Server), Server.Stop);
+			RunShutdownStep(nameof(Database), Program.Database.Close);
+			RunShutdownStep(nameof(HardwareInfo), HardwareInfo.Stop);
 
 			try {
 				var allBackgroundTasks = Task.WhenAll(backgroundTasks);
@@ -128,6 +136,8 @@ public sealed class WindowsBackgroundService : BackgroundService {
 			catch (Exception ex) {
 				Log.Error(ex, "One or more supervised background tasks failed during shutdown");
 			}
+
+			Log.Information("Cores service stopped");
 		}
 	}
 }
